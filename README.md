@@ -176,12 +176,13 @@ say `2`, this may be part of a scheme for
 accessing the first element of a tuple
 (there are other details you should think
 through here; this is _not_ a complete solution.)
-Feel free to add additional `Arg` types in `Types.hs`
-to support a broader range of `mov` instructions, if it helps.
+You may want to use the `RegIndex` constructor
+of the `Arg` datatype to implement the above.
 
-Neither `ECX` nor anything beyond the typical `RegOffset` is _required_ to make
-this work, but you may find it interesting to try different shapes of
-generated instructions.
+Neither `ECX` nor anything beyond the typical 
+`RegOffset` is _required_ to make this work, 
+but you may find it interesting to try 
+different shapes of generated instructions.
 
 #### General Heap Layout
 

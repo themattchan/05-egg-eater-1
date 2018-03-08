@@ -123,9 +123,9 @@ condError True  e = [e]
 condError False _ = []
 
 errDupFun d       = mkError (printf "duplicate function '%s'" (pprint f))    (sourceSpan f) where f = fName d
-errDupParam     x = mkError (printf "Duplicate parameter '%s'" (bindId x)) (sourceSpan x)
-errDupBind      x = mkError (printf "Shadow binding '%s'" (bindId x))      (sourceSpan x)
-errLargeNum   l n = mkError (printf "Number '%d' is too large" n) l
-errUnboundVar l x = mkError (printf "Unbound variable '%s'" x) l
-errUnboundFun l f = mkError (printf "Function '%s' is not defined" f) l
-errCallArity  l f = mkError (printf "Wrong arity of arguments at call of %s" f) l
+errDupParam     x = mkError (printf "duplicate parameter '%s'" (bindId x)) (sourceSpan x)
+errDupBind      x = mkError (printf "shadow binding '%s'" (bindId x))      (sourceSpan x)
+errLargeNum   l n = mkError (printf "number '%d' is too large" n) l
+errUnboundVar l x = mkError (printf "unbound variable '%s'" x) l
+errUnboundFun l f = mkError (printf "function '%s' is not defined" f) l
+errCallArity  l f = mkError (printf "wrong arity of arguments at call of %s" f) l

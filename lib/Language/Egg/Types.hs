@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveFunctor        #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE DataKinds #-}
 
 module Language.Egg.Types
   (
@@ -159,35 +160,44 @@ data Prim2
   | Equal
   deriving (Show)
 
+data Phase = Bare | Tagged | Anfed AnfExpType
+
+data AnfExpType = IsImm | IsAnf
+
+type family Annot (p :: Phase) :: * where
+  Annot Bare = SourceSpan
+  Annot Tagged = (SourceSpan, Int)
+  Annot (Anfed x) = (SourceSpan, Int)
+
 -- | Expr are single expressions
-data Expr a
-  = Number  !Integer                       a
-  | Boolean !Bool                          a
-  | Id      !Id                            a
-  | Prim1   !Prim1    !(Expr a)            a
-  | Prim2   !Prim2    !(Expr a)  !(Expr a) a
-  | If      !(Expr a) !(Expr a)  !(Expr a) a
-  | Let     !(Bind a) !(Expr a)  !(Expr a) a
-  | App     !Id       [Expr a]             a
-  | Tuple   [Expr a]                       a
-  | GetItem !(Expr a) !(Expr a)            a
+data Expr (p :: Phase)
+  = Number  !Integer                          (Annot p)
+  | Boolean !Bool                             (Annot p)
+  | Id      !Id                               (Annot p)
+  | Prim1   !Prim1    !(Expr p)               (Annot p)
+  | Prim2   !Prim2    !(Expr p)  !(Expr p)    (Annot p)
+  | If      !(Expr p) !(Expr p)  !(Expr p)    (Annot p)
+  | Let     !(Bind p) !(Expr p)  !(Expr p)    (Annot p)
+  | App     !Id       [Expr p]                (Annot p)
+  | Tuple   [Expr p]                          (Annot p)
+  | GetItem !(Expr p) !(Expr p)               (Annot p)
     deriving (Show, Functor)
 
 -- | Bind represent the let- or function-params.
 
-data Bind a
-  = Bind !Id a
+data Bind (p :: Phase)
+  = Bind !Id (Annot p)
     deriving (Show, Functor)
 
 
 -- | Decl are function definitions
-data Decl a = Decl
-  { fName  :: !(Bind a)
-  , fArgs  :: [Bind a]
-  , fBody  :: !(Expr a)
-  , fLabel :: a
+data Decl (p :: Phase) = Decl
+  { fName  :: !(Bind p)
+  , fArgs  :: [Bind p]
+  , fBody  :: !(Expr p)
+  , fLabel :: Annot p
   }
-  deriving (Functor)
+--  deriving (Functor)
 
 {-@ data Decl <p :: Expr a -> Prop> a = Decl
       { fName  :: Bind a
@@ -198,9 +208,9 @@ data Decl a = Decl
   @-}
 
 -- | A Program is a list of declarations and "main" Expr
-data Program a = Prog
-  { pDecls :: [Decl a]
-  , pBody  :: !(Expr a)
+data Program (p :: Phase) = Prog
+  { pDecls :: [Decl p]
+  , pBody  :: !(Expr p)
   }
   deriving (Functor)
 
@@ -232,7 +242,7 @@ exprBinds (Let x e e' _) = ((x, e) : bs, body)
 exprBinds body           = ([]        , body)
 
 --------------------------------------------------------------------------------
-getLabel :: Expr a -> a
+getLabel :: Expr a -> Annot a
 --------------------------------------------------------------------------------
 getLabel (Number _ l)    = l
 getLabel (Boolean _ l)   = l
@@ -425,22 +435,22 @@ type AnfExpr = Expr
 type ImmExpr = Expr
 
 {-@ type AnfDecl a = Decl<{\e -> isAnf e}> a @-}
-type AnfDecl    = Decl
+type AnfDecl    = Decl ('Anfed a)
 
 {-@ type AnfProgram a = Program<{\e -> isAnf e}> @-}
-type AnfProgram = Program
+type AnfProgram = Program ('Anfed a)
 
 --------------------------------------------------------------------------------
 -- | The `Bare` types are for parsed ASTs.
 --------------------------------------------------------------------------------
 
-type Bare     = Expr SourceSpan
-type BareBind = Bind SourceSpan
+type BareExpr = Expr 'Bare
+type BareBind = Bind 'Bare
 
-type BareProgram = Program SourceSpan
-type BareDecl    = Decl    SourceSpan
+type BareProgram = Program 'Bare
+type BareDecl    = Decl    'Bare
 
-instance Located Bare where
+instance Located BareExpr where
   sourceSpan = getLabel
 
 instance Located BareBind where

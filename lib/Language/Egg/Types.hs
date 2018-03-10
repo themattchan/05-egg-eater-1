@@ -245,6 +245,7 @@ getLabel (App _ _ l)     = l
 getLabel (Tuple _ l)     = l
 getLabel (GetItem _ _ l) = l
 
+
 --------------------------------------------------------------------------------
 -- | Dynamic Errors
 --------------------------------------------------------------------------------
@@ -257,12 +258,12 @@ data DynError
   | IndexHigh
   deriving (Show)
 
--- | Ty correspond to two kinds of values
 data Ty
   = TNumber
   | TBoolean
   | TTuple
-  deriving (Show)
+  deriving (Show, Eq)
+
 
 --------------------------------------------------------------------------------
 -- | Pretty Printer

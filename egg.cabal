@@ -47,19 +47,21 @@ Library
                        tasty-hunit,
                        tasty-rerun,
                        process,
-                       text
+                       text,
+                       mtl,
+                       transformers
 
   hs-source-dirs:      lib
   default-language:    Haskell2010
 
-Executable egg 
+Executable egg
 
   default-language:    Haskell2010
   ghc-options:         -W -threaded
   main-is:             Main.hs
   hs-source-dirs:      bin
   build-depends:       base,
-                       egg 
+                       egg
 
 test-suite test
   default-language: Haskell98

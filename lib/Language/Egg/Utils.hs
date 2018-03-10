@@ -40,7 +40,7 @@ trim :: String -> String
 trim = f . f  where f = reverse . dropWhile isSpace
 
 trimEnd :: String -> String
-trimEnd = reverse . dropWhile isSpace . reverse  
+trimEnd = reverse . dropWhile isSpace . reverse
 
 executeShellCommand :: FilePath -> String -> Int -> IO ExitCode
 executeShellCommand logF cmd n = fromMaybe (ExitFailure 100) <$> body
@@ -78,3 +78,35 @@ getRange :: Int -> Int -> [a] -> [a]
 getRange i1 i2
   = take (i2 - i1 + 1)
   . drop (i1 - 1)
+
+-----------------------------------------------
+{-
+newtype State s a = State (s -> (s,a))
+
+instance Functor (State s) where
+  fmap f (State k) = State (fmap (fmap f) k)
+instance Applicative (State s) where
+  pure x = State $ \s -> (s, x)
+  State f <*> State a = State $ \s -> let (s', f') = f s
+                                          (s'', a') = a s'
+                                      in (s'', f' a')
+instance Monad (State s) where
+  State x >>= k = State $ \s -> let (s', x') = x s
+                                    (State k') = k x'
+                                in k' s'
+
+get :: State s s
+get = State $ \s -> (s,s)
+put :: s -> State s ()
+put s = State $ \_ -> (s, ())
+runState :: s -> State s a -> (s,a)
+runState st0 (State k) = k st0
+-}
+
+-----------------------------------------------
+
+assocl :: (a, (b, c)) -> ((a, b), c)
+assocl ~(a, (b, c)) = ((a, b), c)
+
+assocr :: ((a, b), c) -> (a, (b, c))
+assocr ~((a, b), c) = (a, (b, c))

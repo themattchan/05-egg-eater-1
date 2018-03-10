@@ -1,7 +1,7 @@
 {-# LANGUAGE DeriveFunctor        #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DataKinds, TypeInType, GADTs #-}
 
 module Language.Egg.Types
   (
@@ -160,39 +160,61 @@ data Prim2
   | Equal
   deriving (Show)
 
-data Phase = Bare | Tagged
-           | Anfed AnfExpType
+
+-- | Phases of compilation
+data Phase = Bare | Tagged | Anfed
+
+--           | Anfed AnfExpType
 --  this does not work because 'Anfed 'IsImm /= 'Anfed 'IsAnf
 -- ... how can you use an index to determine a gadt???
 -- want something like:
 
 -- phase = Bare
--- Prim1 :: Prim1 -> Expr Bare -> Annot Bare -> Expr Bare
+-- Prim1 :: Prim1 -> Expr Bare () -> Annot Bare -> Expr Bare ()
 
 -- phase = Anfed
 -- Prim1 :: Prim1 -> Expr Anfed IsImm -> Annot Anfed -> Expr Anfed IsAnf
 
 
-data AnfExpType = IsImm | IsAnf
+--Expr (p :: Phase) (r :: Refinement p)
 
+-- | Phase-indexed annotations
 type family Annot (p :: Phase) :: * where
-  Annot Bare = SourceSpan
-  Annot Tagged = (SourceSpan, Int)
-  Annot (Anfed x) = (SourceSpan, Int)
+  Annot 'Bare = SourceSpan
+  Annot 'Tagged = (SourceSpan, Int)
+  Annot 'Anfed = (SourceSpan, Int)
+
+-- | Index for subterms in ANF
+data AnfExpType :: * where
+  IsImm :: AnfExpType
+  IsAnf :: AnfExpType
+
+-- | Phase-indexed kind of indices
+type family Refinement (p :: Phase) :: * where
+  Refinement 'Anfed = AnfExpType
+  Refinement _ = ()
+
+type family Prim1_1  (p :: Phase) :: Refinement p where
+  Prim1_1  'Anfed = 'IsImm
+  Prim1_1  _  = '()
+type family Prim1_Ret  (p :: Phase) :: Refinement p where
+  Prim1_Ret  'Anfed = 'IsAnf
+  Prim1_Ret  _  = '()
 
 -- | Expr are single expressions
-data Expr (p :: Phase)
-  = Number  !Integer                          (Annot p)
-  | Boolean !Bool                             (Annot p)
-  | Id      !Id                               (Annot p)
-  | Prim1   !Prim1    !(Expr p)               (Annot p)
-  | Prim2   !Prim2    !(Expr p)  !(Expr p)    (Annot p)
-  | If      !(Expr p) !(Expr p)  !(Expr p)    (Annot p)
-  | Let     !(Bind p) !(Expr p)  !(Expr p)    (Annot p)
-  | App     !Id       [Expr p]                (Annot p)
-  | Tuple   [Expr p]                          (Annot p)
-  | GetItem !(Expr p) !(Expr p)               (Annot p)
-    deriving (Show, Functor)
+data Expr (p :: Phase) (r :: Refinement p) where
+   Number  :: forall (c :: r). !Integer -> Annot p -> Expr p c
+   Boolean :: forall (c :: r). !Bool    -> Annot p -> Expr p c
+   Id      :: forall (c :: r). !Id      -> Annot p -> Expr p c
+   Prim1   :: !Prim1 -> !(Expr p (Prim1_1 p)) -> (Annot p) -> Expr p (Prim1_Ret p)
+
+   Prim2   :: !Prim2    !(Expr p)  !(Expr p)    (Annot p) -> Expr p
+   If      :: !(Expr p) !(Expr p)  !(Expr p)    (Annot p) -> Expr p
+   Let     :: !(Bind p) !(Expr p)  !(Expr p)    (Annot p) -> Expr p
+   App     :: !Id       [Expr p]                (Annot p) -> Expr p
+   Tuple   :: [Expr p]                          (Annot p) -> Expr p
+   GetItem :: !(Expr p) !(Expr p)               (Annot p) -> Expr p
+---    deriving (Show, Functor)
 
 -- | Bind represent the let- or function-params.
 

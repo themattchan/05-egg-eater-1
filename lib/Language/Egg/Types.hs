@@ -160,7 +160,18 @@ data Prim2
   | Equal
   deriving (Show)
 
-data Phase = Bare | Tagged | Anfed AnfExpType
+data Phase = Bare | Tagged
+           | Anfed AnfExpType
+--  this does not work because 'Anfed 'IsImm /= 'Anfed 'IsAnf
+-- ... how can you use an index to determine a gadt???
+-- want something like:
+
+-- phase = Bare
+-- Prim1 :: Prim1 -> Expr Bare -> Annot Bare -> Expr Bare
+
+-- phase = Anfed
+-- Prim1 :: Prim1 -> Expr Anfed IsImm -> Annot Anfed -> Expr Anfed IsAnf
+
 
 data AnfExpType = IsImm | IsAnf
 

@@ -1,7 +1,7 @@
 {-# LANGUAGE DeriveFunctor        #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE DataKinds, TypeInType, GADTs #-}
+{-# LANGUAGE DataKinds, TypeInType, GADTs, Rank2Types, TypeFamilies #-}
 
 module Language.Egg.Types
   (
@@ -69,6 +69,8 @@ import           Data.Maybe                       (isJust)
 import           Text.Printf
 import           System.FilePath                  ((<.>))
 import           Language.Egg.UX
+
+import qualified Data.Kind as GHC (Type)
 
 data Reg
   = EAX
@@ -161,7 +163,7 @@ data Prim2
   deriving (Show)
 
 
--- | Phases of compilation
+-- | Phases of AST transformation
 data Phase = Bare | Tagged | Anfed
 
 --           | Anfed AnfExpType
@@ -179,41 +181,74 @@ data Phase = Bare | Tagged | Anfed
 --Expr (p :: Phase) (r :: Refinement p)
 
 -- | Phase-indexed annotations
-type family Annot (p :: Phase) :: * where
+type family Annot (p :: Phase) :: GHC.Type where
   Annot 'Bare = SourceSpan
   Annot 'Tagged = (SourceSpan, Int)
   Annot 'Anfed = (SourceSpan, Int)
 
 -- | Index for subterms in ANF
-data AnfExpType :: * where
+data AnfExpType :: GHC.Type where
   IsImm :: AnfExpType
   IsAnf :: AnfExpType
 
 -- | Phase-indexed kind of indices
-type family Refinement (p :: Phase) :: * where
+type family Refinement (p :: Phase) :: GHC.Type where
   Refinement 'Anfed = AnfExpType
-  Refinement _ = ()
+  Refinement a = ()
 
-type family Prim1_1  (p :: Phase) :: Refinement p where
-  Prim1_1  'Anfed = 'IsImm
-  Prim1_1  _  = '()
-type family Prim1_Ret  (p :: Phase) :: Refinement p where
-  Prim1_Ret  'Anfed = 'IsAnf
-  Prim1_Ret  _  = '()
+-- | Index expr as Imm or Anf, after ANFification
+type family ImmIfAnf  (p :: Phase) :: Refinement p where
+  ImmIfAnf  'Anfed = 'IsImm
+  ImmIfAnf  a  = '()
+type family AnfIfAnf  (p :: Phase) :: Refinement p where
+  AnfIfAnf  'Anfed = 'IsAnf
+  AnfIfAnf  a  = '()
 
 -- | Expr are single expressions
 data Expr (p :: Phase) (r :: Refinement p) where
-   Number  :: forall (c :: r). !Integer -> Annot p -> Expr p c
-   Boolean :: forall (c :: r). !Bool    -> Annot p -> Expr p c
-   Id      :: forall (c :: r). !Id      -> Annot p -> Expr p c
-   Prim1   :: !Prim1 -> !(Expr p (Prim1_1 p)) -> (Annot p) -> Expr p (Prim1_Ret p)
 
-   Prim2   :: !Prim2    !(Expr p)  !(Expr p)    (Annot p) -> Expr p
-   If      :: !(Expr p) !(Expr p)  !(Expr p)    (Annot p) -> Expr p
-   Let     :: !(Bind p) !(Expr p)  !(Expr p)    (Annot p) -> Expr p
-   App     :: !Id       [Expr p]                (Annot p) -> Expr p
-   Tuple   :: [Expr p]                          (Annot p) -> Expr p
-   GetItem :: !(Expr p) !(Expr p)               (Annot p) -> Expr p
+   Number  :: forall (p :: Phase) (c :: r). !Integer -> Annot p -> Expr p c
+   Boolean :: forall (p :: Phase) (c :: r). !Bool    -> Annot p -> Expr p c
+   Id      :: forall (p :: Phase) (c :: r). !Id      -> Annot p -> Expr p c
+
+   Prim1   :: !Prim1
+           -> !(Expr p (ImmIfAnf p))
+           -> Annot p
+           -> Expr p (AnfIfAnf p)
+
+   Prim2   :: !Prim2
+           -> !(Expr p (ImmIfAnf p))
+           -> !(Expr p (ImmIfAnf p))
+           -> Annot p
+           -> Expr p (AnfIfAnf p)
+
+   If      :: !(Expr p (ImmIfAnf p))
+           -> !(Expr p (AnfIfAnf p))
+           -> !(Expr p (AnfIfAnf p))
+           -> (Annot p)
+           -> Expr p (AnfIfAnf p)
+
+   Let     :: !(Bind p)
+           -> !(Expr p (AnfIfAnf p))
+           -> !(Expr p (AnfIfAnf p))
+           -> (Annot p)
+           -> Expr p (AnfIfAnf p)
+
+   App     :: !Id
+           -> [Expr p (ImmIfAnf p)]
+           -> (Annot p)
+           -> Expr p (AnfIfAnf p)
+
+   Tuple   :: [Expr p (ImmIfAnf p)]
+           -> (Annot p)
+           -> Expr p (AnfIfAnf p)
+
+   GetItem :: !(Expr p (ImmIfAnf p))
+           -> !(Expr p (ImmIfAnf p))
+           -> (Annot p)
+           -> Expr p (AnfIfAnf p)
+
+
 ---    deriving (Show, Functor)
 
 -- | Bind represent the let- or function-params.
@@ -227,7 +262,7 @@ data Bind (p :: Phase)
 data Decl (p :: Phase) = Decl
   { fName  :: !(Bind p)
   , fArgs  :: [Bind p]
-  , fBody  :: !(Expr p)
+  , fBody  :: !(Expr p (AnfIfAnf p))
   , fLabel :: Annot p
   }
 --  deriving (Functor)
@@ -242,8 +277,8 @@ data Decl (p :: Phase) = Decl
 
 -- | A Program is a list of declarations and "main" Expr
 data Program (p :: Phase) = Prog
-  { pDecls :: [Decl p]
-  , pBody  :: !(Expr p)
+  { pDecls :: [Decl p (AnfIfAnf p)]
+  , pBody  :: !(Expr p (AnfIfAnf p))
   }
   deriving (Functor)
 
@@ -462,16 +497,16 @@ isImm (Id      _ _) = True
 isImm _             = False
 
 {-@ type AnfExpr a = {v:Expr a| isAnf v} @-}
-type AnfExpr = Expr
+type AnfExpr = Expr Anfed 'IsAnf
 
 {-@ type ImmExpr a = {v:Expr a | isImm v} @-}
-type ImmExpr = Expr
+type ImmExpr = Expr 'Anfed 'IsImm
 
 {-@ type AnfDecl a = Decl<{\e -> isAnf e}> a @-}
-type AnfDecl    = Decl ('Anfed a)
+type AnfDecl    = Decl 'Anfed
 
 {-@ type AnfProgram a = Program<{\e -> isAnf e}> @-}
-type AnfProgram = Program ('Anfed a)
+type AnfProgram = Program 'Anfed
 
 --------------------------------------------------------------------------------
 -- | The `Bare` types are for parsed ASTs.

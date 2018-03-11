@@ -1,3 +1,4 @@
+
 {-# LANGUAGE FlexibleContexts #-}
 
 --------------------------------------------------------------------------------
@@ -77,18 +78,15 @@ addsEnv xs env = L.foldl' (\env x -> addEnv x env) env xs
 -- | Error Checkers: In each case, return an empty list if no errors.
 --------------------------------------------------------------------------------
 duplicateFunErrors :: [BareDecl] -> [UserError]
-duplicateFunErrors ds
-  = map errDupFun
-  . concat
-  . dupBy (bindId . fName)
-  $ ds
+duplicateFunErrors
+  = foldMap (errDupFun . fst)
+  . groupBy (bindId . fName)
 
 duplicateParamErrors :: [BareBind] -> [UserError]
-duplicateParamErrors xs
+duplicateParamErrors
   = map errDupParam
   . map head
   . dupBy bindId
-  $ xs
 
 duplicateBindErrors :: Env -> BareBind -> [UserError]
 duplicateBindErrors vEnv x

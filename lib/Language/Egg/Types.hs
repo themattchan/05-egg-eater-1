@@ -70,6 +70,11 @@ import           Text.Printf
 import           System.FilePath                  ((<.>))
 import           Language.Egg.UX
 
+import Control.Monad.State.Class
+-- import Control.Monad.Writer.Class
+-- import Control.Monad.Trans.Writer.Lazy (WriterT(..))
+import Control.Monad.Trans.State.Lazy (evalState)
+
 import qualified Data.Kind as GHC (Type)
 
 data Reg
@@ -323,6 +328,22 @@ getLabel (App _ _ l)     = l
 getLabel (Tuple _ l)     = l
 getLabel (GetItem _ _ l) = l
 
+-- TODO abstract this to a constrained Functor instance
+-- class CFunctor (kind :: GHC.Type) (functor :: kind -> GHC.Type -> GHC.Type) where
+--   cfmap :: forall (a :: kind) (b :: kind) (c :: GHC.Type). (c a -> c b)
+
+mapAnnotE :: forall (a :: Phase) (b :: Phase). (Annot a -> Annot b) -> Expr a -> Expr b
+mapAnnotE f (Number a l)    = (Number a (f l))
+mapAnnotE f (Boolean a l)   = (Boolean a (f l))
+mapAnnotE f (Id a l)        = (Id a (f l))
+mapAnnotE f (Prim1 a b l)   = (Prim1 a b (f l))
+mapAnnotE f (Prim2 a b c l) = (Prim2 a b c (f l))
+mapAnnotE f (If a b c l)    = (If a b c (f l))
+mapAnnotE f (Let a b c l)   = (Let a b c (f l))
+mapAnnotE f (App a b l)     = (App a b (f l))
+mapAnnotE f (Tuple a l)     = (Tuple a (f l))
+mapAnnotE f (GetItem a b l) = (GetItem a b (f l))
+
 
 --------------------------------------------------------------------------------
 -- | Dynamic Errors
@@ -410,14 +431,14 @@ ppBinds bs = L.intercalate ", " [ printf "%s = %s" (pprint x) (pprint v) | (x, v
 --------------------------------------------------------------------------------
 -- | Transformation to ensure each sub-expression gets a distinct tag
 --------------------------------------------------------------------------------
-label :: Program a -> Program (a, Tag)
-label (Prog ds e) = Prog ds' e'
-  where
-    (i', ds')     = L.mapAccumL labelD 1  ds
-    (_ , e')      =             labelE i' e
+label :: Program 'Bare -> Program 'Tagged
+label (Prog ds e) = evalState (Prog <$> labelD ds <$> labelE e') 1
+  -- where
+  --   (i', ds')     = L.mapAccumL labelD 1  ds
+  --   (_ , e')      =             labelE i' e
 
 --------------------------------------------------------------------------------
-labelD :: Int -> Decl a -> (Int, Decl (a, Tag))
+labelD :: MonadState Int m => Decl 'Bare -> m (Expr 'Tagged)
 --------------------------------------------------------------------------------
 labelD i (Decl f xs e l) = labelTop i'' l (Decl f' xs' e')
   where
@@ -425,7 +446,7 @@ labelD i (Decl f xs e l) = labelTop i'' l (Decl f' xs' e')
     (i'', f':xs')        = L.mapAccumL labelBind i' (f:xs)
 
 --------------------------------------------------------------------------------
-labelE :: Int -> Expr a -> (Int, Expr (a, Tag))
+labelE :: MonadState Int m => Expr 'Bare -> m (Expr 'Tagged)
 --------------------------------------------------------------------------------
 labelE i e = go i e
   where
@@ -467,11 +488,20 @@ labelE i e = go i e
       where
         (i', es')       = L.mapAccumL go i es
 
-labelTop :: Tag -> a -> ((a, Tag) -> b) -> (Tag, b)
-labelTop i l c             = (i + 1, c (l, i))
+
+--mapAnnotE :: forall (a :: Phase) (b :: Phase). (Annot a -> Annot b) -> Expr a -> Expr b
+labelTop :: MonadState Int m => Expr 'Bare -> m (Expr 'Tagged)-- Tag -> a -> ((a, Tag) -> b) -> (Tag, b)
+labelTop = mapAnnot
+--labelTop i l c             = (i + 1, c (l, i))
 
 labelBind :: Tag -> Bind a -> (Tag, Bind (a, Tag))
 labelBind i (Bind x l)     = labelTop i l (Bind x)
+
+tagAnnot :: MonadState Int m => Annot 'Bare -> m (Annot 'Tagged)
+tagAnnot annot0 = do
+  i <- get
+  put (i+1)
+  return $ (annot0, i)
 
 --------------------------------------------------------------------------------
 -- | `isAnf e` is True if `e` is an A-Normal Form

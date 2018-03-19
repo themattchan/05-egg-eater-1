@@ -9,7 +9,6 @@ mkDerivation {
   src = ./.;
   isLibrary = true;
   isExecutable = true;
-  enableSeparateDataOutput = true;
   libraryHaskellDepends = [
     array base cmdargs containers directory filepath megaparsec mtl
     pretty process semigroups tasty tasty-hunit tasty-rerun text

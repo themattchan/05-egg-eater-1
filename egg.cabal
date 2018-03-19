@@ -42,7 +42,7 @@ Library
                        directory,
                        filepath,
                        semigroups,
-                       megaparsec,
+                       megaparsec >= 6.0.0,
                        tasty,
                        tasty-hunit,
                        tasty-rerun,

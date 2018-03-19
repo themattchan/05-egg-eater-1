@@ -199,22 +199,25 @@ data AnfExpType :: GHC.Type where
 -- | Phase-indexed kind of indices
 type family Refinement (p :: Phase) :: GHC.Type where
   Refinement 'Anfed = AnfExpType
-  Refinement a = ()
+  Refinement 'Bare = ()
+  Refinement 'Tagged = ()
 
 -- | Index expr as Imm or Anf, after ANFification
 type family ImmIfAnf  (p :: Phase) :: Refinement p where
   ImmIfAnf  'Anfed = 'IsImm
-  ImmIfAnf  a  = '()
+  ImmIfAnf  'Bare  = '()
+  ImmIfAnf  'Tagged  = '()
 type family AnfIfAnf  (p :: Phase) :: Refinement p where
   AnfIfAnf  'Anfed = 'IsAnf
-  AnfIfAnf  a  = '()
+  AnfIfAnf  'Bare  = '()
+  AnfIfAnf  'Tagged  = '()
 
 -- | Expr are single expressions
 data Expr (p :: Phase) (r :: Refinement p) where
 
-   Number  :: forall (p :: Phase) (c :: r). !Integer -> Annot p -> Expr p c
-   Boolean :: forall (p :: Phase) (c :: r). !Bool    -> Annot p -> Expr p c
-   Id      :: forall (p :: Phase) (c :: r). !Id      -> Annot p -> Expr p c
+   Number  :: !Integer -> Annot p -> Expr p r
+   Boolean :: !Bool    -> Annot p -> Expr p r
+   Id      :: !Id      -> Annot p -> Expr p r
 
    Prim1   :: !Prim1
            -> !(Expr p (ImmIfAnf p))
@@ -230,27 +233,27 @@ data Expr (p :: Phase) (r :: Refinement p) where
    If      :: !(Expr p (ImmIfAnf p))
            -> !(Expr p (AnfIfAnf p))
            -> !(Expr p (AnfIfAnf p))
-           -> (Annot p)
+           -> Annot p
            -> Expr p (AnfIfAnf p)
 
    Let     :: !(Bind p)
            -> !(Expr p (AnfIfAnf p))
            -> !(Expr p (AnfIfAnf p))
-           -> (Annot p)
+           -> Annot p
            -> Expr p (AnfIfAnf p)
 
    App     :: !Id
            -> [Expr p (ImmIfAnf p)]
-           -> (Annot p)
+           -> Annot p
            -> Expr p (AnfIfAnf p)
 
    Tuple   :: [Expr p (ImmIfAnf p)]
-           -> (Annot p)
+           -> Annot p
            -> Expr p (AnfIfAnf p)
 
    GetItem :: !(Expr p (ImmIfAnf p))
            -> !(Expr p (ImmIfAnf p))
-           -> (Annot p)
+           -> Annot p
            -> Expr p (AnfIfAnf p)
 
 
@@ -282,7 +285,7 @@ data Decl (p :: Phase) = Decl
 
 -- | A Program is a list of declarations and "main" Expr
 data Program (p :: Phase) = Prog
-  { pDecls :: [Decl p (AnfIfAnf p)]
+  { pDecls :: [Decl p]
   , pBody  :: !(Expr p (AnfIfAnf p))
   }
   deriving (Functor)

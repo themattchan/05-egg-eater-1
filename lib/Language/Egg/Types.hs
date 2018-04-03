@@ -1,6 +1,14 @@
-{-# LANGUAGE DeriveFunctor        #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeInType #-}
 {-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances    #-}
 
 module Language.Egg.Types
   (
@@ -69,6 +77,13 @@ import           Text.Printf
 import           System.FilePath                  ((<.>))
 import           Language.Egg.UX
 
+import Control.Monad.State.Class
+-- import Control.Monad.Writer.Class
+-- import Control.Monad.Trans.Writer.Lazy (WriterT(..))
+import Control.Monad.Trans.State.Lazy (evalState)
+
+import qualified Data.Kind as GHC (Type)
+--import GHC.Exts (Constriant)
 data Reg
   = EAX
   | EBX
@@ -159,35 +174,116 @@ data Prim2
   | Equal
   deriving (Show)
 
+
+-- | Phases of AST transformation
+data Phase = Bare | Tagged | Anfed
+  deriving (Eq, Ord, Show, Bounded, Enum)
+--           | Anfed AnfExpType
+--  this does not work because 'Anfed 'IsImm /= 'Anfed 'IsAnf
+-- ... how can you use an index to determine a gadt???
+-- want something like:
+
+-- phase = Bare
+-- Prim1 :: Prim1 -> Expr Bare () -> Annot Bare -> Expr Bare ()
+
+-- phase = Anfed
+-- Prim1 :: Prim1 -> Expr Anfed IsImm -> Annot Anfed -> Expr Anfed IsAnf
+
+
+--Expr (p :: Phase) (r :: Refinement p)
+
+-- | Phase-indexed annotations
+type family Annot (p :: Phase) :: GHC.Type where
+  Annot 'Bare = SourceSpan
+  Annot 'Tagged = (SourceSpan, Int)
+  Annot 'Anfed = (SourceSpan, Int)
+
+-- | Index for subterms in ANF
+data AnfExpType :: GHC.Type where
+  IsImm :: AnfExpType
+  IsAnf :: AnfExpType
+
+-- | Phase-indexed kind of indices
+type family Refinement (p :: Phase) :: GHC.Type where
+  Refinement 'Anfed = AnfExpType
+  Refinement 'Bare = ()
+  Refinement 'Tagged = ()
+
+-- | Index expr as Imm or Anf, after ANFification
+type family ImmIfAnf  (p :: Phase) :: Refinement p where
+  ImmIfAnf  'Anfed = 'IsImm
+  ImmIfAnf  'Bare  = '()
+  ImmIfAnf  'Tagged  = '()
+type family AnfIfAnf  (p :: Phase) :: Refinement p where
+  AnfIfAnf  'Anfed = 'IsAnf
+  AnfIfAnf  'Bare  = '()
+  AnfIfAnf  'Tagged  = '()
+
 -- | Expr are single expressions
-data Expr a
-  = Number  !Integer                       a
-  | Boolean !Bool                          a
-  | Id      !Id                            a
-  | Prim1   !Prim1    !(Expr a)            a
-  | Prim2   !Prim2    !(Expr a)  !(Expr a) a
-  | If      !(Expr a) !(Expr a)  !(Expr a) a
-  | Let     !(Bind a) !(Expr a)  !(Expr a) a
-  | App     !Id       [Expr a]             a
-  | Tuple   [Expr a]                       a
-  | GetItem !(Expr a) !(Expr a)            a
-    deriving (Show, Functor)
+data Expr (p :: Phase) (r :: Refinement p) where
+
+   Number  :: !Integer -> Annot p -> Expr p r
+   Boolean :: !Bool    -> Annot p -> Expr p r
+   Id      :: !Id      -> Annot p -> Expr p r
+
+   Prim1   :: !Prim1
+           -> !(Expr p (ImmIfAnf p))
+           -> Annot p
+           -> Expr p (AnfIfAnf p)
+
+   Prim2   :: !Prim2
+           -> !(Expr p (ImmIfAnf p))
+           -> !(Expr p (ImmIfAnf p))
+           -> Annot p
+           -> Expr p (AnfIfAnf p)
+
+   If      :: !(Expr p (ImmIfAnf p))
+           -> !(Expr p (AnfIfAnf p))
+           -> !(Expr p (AnfIfAnf p))
+           -> Annot p
+           -> Expr p (AnfIfAnf p)
+
+   Let     :: !(Bind p)
+           -> !(Expr p (AnfIfAnf p))
+           -> !(Expr p (AnfIfAnf p))
+           -> Annot p
+           -> Expr p (AnfIfAnf p)
+
+   App     :: !Id
+           -> [Expr p (ImmIfAnf p)]
+           -> Annot p
+           -> Expr p (AnfIfAnf p)
+
+   Tuple   :: [Expr p (ImmIfAnf p)]
+           -> Annot p
+           -> Expr p (AnfIfAnf p)
+
+   GetItem :: !(Expr p (ImmIfAnf p))
+           -> !(Expr p (ImmIfAnf p))
+           -> Annot p
+           -> Expr p (AnfIfAnf p)
+
+deriving instance forall a b. Show (Expr a b)
+
+---    deriving (Show, Functor)
 
 -- | Bind represent the let- or function-params.
 
-data Bind a
-  = Bind !Id a
-    deriving (Show, Functor)
-
+data Bind (p :: Phase)
+  = Bind !Id (Annot p)
+--    deriving (Show)
+deriving instance forall a. Show (Bind a)
 
 -- | Decl are function definitions
-data Decl a = Decl
-  { fName  :: !(Bind a)
-  , fArgs  :: [Bind a]
-  , fBody  :: !(Expr a)
-  , fLabel :: a
+data Decl (p :: Phase) = Decl
+  { fName  :: !(Bind p)
+  , fArgs  :: [Bind p]
+  , fBody  :: !(Expr p (AnfIfAnf p))
+  , fLabel :: Annot p
   }
-  deriving (Functor)
+--  deriving (Functor)
+
+deriving instance forall a. Show (Decl a)
 
 {-@ data Decl <p :: Expr a -> Prop> a = Decl
       { fName  :: Bind a
@@ -198,11 +294,13 @@ data Decl a = Decl
   @-}
 
 -- | A Program is a list of declarations and "main" Expr
-data Program a = Prog
-  { pDecls :: [Decl a]
-  , pBody  :: !(Expr a)
+data Program (p :: Phase) = Prog
+  { pDecls :: [Decl p]
+  , pBody  :: !(Expr p (AnfIfAnf p))
   }
-  deriving (Functor)
+--  deriving (Functor)
+
+deriving instance forall p. Show (Program p)
 
 {-@ data Program <p :: Expr a -> Prop> a = Prog
       { pDecls :: [Decl<p> a]
@@ -214,25 +312,25 @@ data Program a = Prog
 bindId :: Bind a -> Id
 bindId (Bind x _) = x
 
--- | Constructing `Expr` from a sequence of `Expr`
-exprsExpr :: ListNE (Expr a) -> a -> Expr a
-exprsExpr [e] _ = e
-exprsExpr es  l = Tuple es l
+-- -- | Constructing `Expr` from a sequence of `Expr`
+-- exprsExpr :: forall (p :: Phase) (r :: Refinement p). ListNE (Expr p r) -> Annot p -> Expr p (AnfIfAnf p)
+-- exprsExpr [e] _ = e
+-- exprsExpr es  l = Tuple es l
 
 
--- | Constructing `Expr` from let-binds
-bindsExpr :: [(Bind a, Expr a)] -> Expr a -> a -> Expr a
-bindsExpr bs e l = foldr (\(x, e1) e2  -> Let x e1 e2 l) e bs
+-- -- | Constructing `Expr` from let-binds
+-- bindsExpr :: [(Bind a, Expr a r)] -> Expr a r -> Annot a -> Expr a r
+-- bindsExpr bs e l = foldr (\(x, e1) e2  -> Let x e1 e2 l) e bs
 
--- | Destructing `Expr` into let-binds
-exprBinds :: Expr a -> ([(Bind a, Expr a)], Expr a)
-exprBinds (Let x e e' _) = ((x, e) : bs, body)
-  where
-    (bs, body)           = exprBinds e'
-exprBinds body           = ([]        , body)
+-- -- | Destructing `Expr` into let-binds
+-- exprBinds :: Expr a r -> ([(Bind a, Expr a r)], Expr a r)
+-- exprBinds (Let x e e' _) = ((x, e) : bs, body)
+--   where
+--     (bs, body)           = exprBinds e'
+-- exprBinds body           = ([]        , body)
 
 --------------------------------------------------------------------------------
-getLabel :: Expr a -> a
+getLabel :: Expr a r -> Annot a
 --------------------------------------------------------------------------------
 getLabel (Number _ l)    = l
 getLabel (Boolean _ l)   = l
@@ -244,6 +342,24 @@ getLabel (Let _ _ _ l)   = l
 getLabel (App _ _ l)     = l
 getLabel (Tuple _ l)     = l
 getLabel (GetItem _ _ l) = l
+
+-- TODO use lenses !!!
+
+-- TODO abstract this to a constrained Functor instance
+-- class CFunctor (kind :: GHC.Type) (functor :: kind -> GHC.Type -> GHC.Type) where
+--   cfmap :: forall (a :: kind) (b :: kind) (c :: GHC.Type). (c a -> c b)
+
+-- mapAnnotE :: forall (a :: Phase) (b :: Phase) . (Annot a -> Annot b) -> Expr a (r a) -> Expr b (r b)
+-- mapAnnotE f (Number a l)    = (Number a <$> (f l))
+-- mapAnnotE f (Boolean a l)   = (Boolean a <$> (f l))
+-- mapAnnotE f (Id a l)        = (Id a <$> (f l))
+-- mapAnnotE f (Prim1 a b l)   = (Prim1 a b <$> (f l))
+-- mapAnnotE f (Prim2 a b c l) = (Prim2 a b c <$> (f l))
+-- mapAnnotE f (If a b c l)    = (If a b c <$> (f l))
+-- mapAnnotE f (Let a b c l)   = (Let a b c <$> (f l))
+-- mapAnnotE f (App a b l)     = (App a b <$> (f l))
+-- mapAnnotE f (Tuple a l)     = (Tuple a <$> (f l))
+-- mapAnnotE f (GetItem a b l) = (GetItem a b <$> (f l))
 
 
 --------------------------------------------------------------------------------
@@ -296,7 +412,7 @@ instance PPrint Bool where
 instance PPrint (Bind a) where
   pprint (Bind x _) = x
 
-instance PPrint (Expr a) where
+instance PPrint (Expr a r) where
   pprint (Number n _)    = show n
   pprint (Boolean b _)   = pprint b
   pprint (Id x _)        = x
@@ -325,81 +441,77 @@ nest n     = unlines . map pad . lines
 pprintMany :: (PPrint a) => [a] -> Text
 pprintMany xs = L.intercalate ", " (map pprint xs)
 
-ppBinds :: [(Bind a, Expr a)] -> Text
+ppBinds :: [(Bind a, Expr a r)] -> Text
 ppBinds bs = L.intercalate ", " [ printf "%s = %s" (pprint x) (pprint v) | (x, v) <- bs ]
 
 
 --------------------------------------------------------------------------------
 -- | Transformation to ensure each sub-expression gets a distinct tag
 --------------------------------------------------------------------------------
-label :: Program a -> Program (a, Tag)
-label (Prog ds e) = Prog ds' e'
+label :: Program 'Bare -> Program 'Tagged
+label (Prog ds e) = evalState (Prog . labelD ds <$> labelE e') 1
+  -- where
+  --   (i', ds')     = L.mapAccumL labelD 1  ds
+  --   (_ , e')      =             labelE i' e
+
+--------------------------------------------------------------------------------
+labelD :: MonadState Int m => Decl 'Bare -> m TaggedExpr
+--------------------------------------------------------------------------------
+labelD (Decl f xs e l) = Decl <$> labelBind f <*> mapM labelBind xs <*> labelE e <*> tagAnnot l
+-- labelD i (Decl f xs e l) = labelTop i'' l (Decl f' xs' e')
+--   where
+--     (i', e')             = labelE i e
+--     (i'', f':xs')        = L.mapAccumL labelBind i' (f:xs)
+
+--------------------------------------------------------------------------------
+labelE :: MonadState Int m => BareExpr -> m TaggedExpr
+--------------------------------------------------------------------------------
+labelE = go
   where
-    (i', ds')     = L.mapAccumL labelD 1  ds
-    (_ , e')      =             labelE i' e
+    go (Number n l)      = Number n <$> tagAnnot l
 
---------------------------------------------------------------------------------
-labelD :: Int -> Decl a -> (Int, Decl (a, Tag))
---------------------------------------------------------------------------------
-labelD i (Decl f xs e l) = labelTop i'' l (Decl f' xs' e')
-  where
-    (i', e')             = labelE i e
-    (i'', f':xs')        = L.mapAccumL labelBind i' (f:xs)
+    go (Boolean b l)     = Boolean b <$> tagAnnot l
 
---------------------------------------------------------------------------------
-labelE :: Int -> Expr a -> (Int, Expr (a, Tag))
---------------------------------------------------------------------------------
-labelE i e = go i e
-  where
-    go i (Number n l)      = labelTop i  l (Number n)
+    go (Id     x l)      = Id x <$> tagAnnot l
 
-    go i (Boolean b l)     = labelTop i  l (Boolean b)
+    go (Prim1 o e1 l)    = Prim1 o <$> go e1 <*> tagAnnot l
 
-    go i (Id     x l)      = labelTop i  l (Id x)
+    go (Prim2 o e1 e2 l) = Prim2 o <$> go e1 <*> go e2 <*> tagAnnot l
 
-    go i (Prim1 o e1 l)    = labelTop i' l (Prim1 o e1')
-      where
-        (i', e1')          = go i e1
+    go (If c e1 e2 l)    = If <$> go c <*> go e1 <*> go e2 <*> tagAnnot l
 
-    go i (Prim2 o e1 e2 l) = labelTop i'' l (Prim2 o e1' e2')
-      where
-        (i',  e1')         = go i  e1
-        (i'', e2')         = go i' e2
+    go (Let x e b l)     = do
+      e' <- go e
+      b' <- go b
+      x' <- labelBind x
+      l' <- tagAnnot l
+      pure (Let x' e' b' l)
 
-    go i (If c e1 e2 l)    = labelTop i''' l (If c' e1' e2')
-      where
-        (i'  , c' )        = go i   c
-        (i'' , e1')        = go i'  e1
-        (i''', e2')        = go i'' e2
+    go (Tuple es l)      = Tuple <$> mapM go es <*> tagAnnot l
 
-    go i (Let x e b l)     = labelTop i'' l (Let x' e' b')
-      where
-        (i', [e', b'])     = L.mapAccumL go i [e, b]
-        (i'', x')          = labelBind i' x
+    go (GetItem e1 e2 l) = GetItem <$> go e1 <*> go e2 <*> tagAnnot l
 
-    go i (Tuple es l)      = labelTop i' l (Tuple es')
-      where
-        (i', es')          = L.mapAccumL go i es
+    go (App f es l)      = App f <$> mapM go es <*> tagAnnot l
 
-    go i (GetItem e1 e2 l) = labelTop i' l (GetItem e1' e2')
-      where
-        (i', [e1', e2'])   = L.mapAccumL go i [e1, e2]
+--mapAnnotE :: forall (a :: Phase) (b :: Phase). (Annot a -> Annot b) -> Expr a -> Expr b
+-- labelTop :: MonadState Int m => BareExpr -> m TaggedExpr
+-- labelTop = mapAnnotE tagAnnot
+--labelTop i l c             = (i + 1, c (l, i))
 
-    go i (App f es l)      = labelTop i' l (App f es')
-      where
-        (i', es')       = L.mapAccumL go i es
+labelBind :: MonadState Int m => BareBind -> m TaggedBind
+labelBind (Bind x l) = Bind x <$> tagAnnot l
 
-labelTop :: Tag -> a -> ((a, Tag) -> b) -> (Tag, b)
-labelTop i l c             = (i + 1, c (l, i))
-
-labelBind :: Tag -> Bind a -> (Tag, Bind (a, Tag))
-labelBind i (Bind x l)     = labelTop i l (Bind x)
+tagAnnot :: MonadState Int m => Annot 'Bare -> m (Annot 'Tagged)
+tagAnnot annot0 = do
+  i <- get
+  put (i+1)
+  return (annot0, i)
 
 --------------------------------------------------------------------------------
 -- | `isAnf e` is True if `e` is an A-Normal Form
 --------------------------------------------------------------------------------
 {-@ measure isAnf @-}
-isAnf :: Expr a -> Bool
+isAnf :: Expr a r -> Bool
 isAnf (Number  _ _)    = True
 isAnf (Boolean _ _)    = True
 isAnf (Id      _ _)    = True
@@ -412,39 +524,42 @@ isAnf (GetItem e i _)  = isImm e && isImm i
 isAnf (App _ es _)     = all isImm es
 
 {-@ measure isImm @-}
-isImm :: Expr a -> Bool
+isImm :: Expr a r -> Bool
 isImm (Number  _ _) = True
 isImm (Boolean _ _) = True
 isImm (Id      _ _) = True
 isImm _             = False
 
 {-@ type AnfExpr a = {v:Expr a| isAnf v} @-}
-type AnfExpr = Expr
+type AnfExpr = Expr Anfed 'IsAnf
 
 {-@ type ImmExpr a = {v:Expr a | isImm v} @-}
-type ImmExpr = Expr
+type ImmExpr = Expr 'Anfed 'IsImm
 
 {-@ type AnfDecl a = Decl<{\e -> isAnf e}> a @-}
-type AnfDecl    = Decl
+type AnfDecl    = Decl 'Anfed
 
 {-@ type AnfProgram a = Program<{\e -> isAnf e}> @-}
-type AnfProgram = Program
+type AnfProgram = Program 'Anfed
 
 --------------------------------------------------------------------------------
 -- | The `Bare` types are for parsed ASTs.
 --------------------------------------------------------------------------------
 
-type Bare     = Expr SourceSpan
-type BareBind = Bind SourceSpan
+type BareExpr = Expr 'Bare '()
+type BareBind = Bind 'Bare
 
-type BareProgram = Program SourceSpan
-type BareDecl    = Decl    SourceSpan
+type BareProgram = Program 'Bare
+type BareDecl    = Decl    'Bare
 
-instance Located Bare where
+instance Located BareExpr where
   sourceSpan = getLabel
 
 instance Located BareBind where
   sourceSpan (Bind _ l) = l
+
+type TaggedExpr = Expr 'Tagged '()
+type TaggedBind = Bind 'Tagged
 
 --------------------------------------------------------------------------------
 -- | Functions for accessing the "environment" (stack)
